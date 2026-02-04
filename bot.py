@@ -30,11 +30,10 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# ---------------- BOT TOKEN (FROM ENV) ----------------
+# ---------------- BOT TOKEN ----------------
 TOKEN = os.getenv("TOKEN")
-
 if not TOKEN:
-    raise RuntimeError("❌ BOT TOKEN not found! Set TOKEN in Railway variables.")
+    raise RuntimeError("❌ BOT_TOKEN not found! Set it in environment variables.")
 
 # ---------------- PROGRESS HANDLER ----------------
 class DownloadProgressHandler:
@@ -71,29 +70,85 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await update.message.reply_html(
         f"Hi {user.mention_html()} 👋\n\n"
-        "Send me a YouTube link and I will download it 🎬",
+        "Send me a YouTube or Instagram link\n"
+        "🎬 YouTube → choose quality\n"
+        "📸 Instagram → auto download",
         reply_markup=ForceReply(selective=True),
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "📌 Send a YouTube link\n"
-        "🎞 Choose quality\n"
-        "⬇️ I will download & send it"
+        "📌 Supported platforms:\n"
+        "• YouTube (video/audio)\n"
+        "• Instagram (Reels & Posts)\n\n"
+        "Just send the link!"
     )
 
-# ---------------- RECEIVE VIDEO LINK ----------------
+# ---------------- RECEIVE LINK ----------------
 async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     video_url = update.message.text.strip()
 
-    if not re.match(r"^(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+", video_url):
+    if not re.match(
+        r"^(https?://)?(www\.)?(youtube\.com|youtu\.be|instagram\.com)/.+",
+        video_url,
+    ):
         await context.bot.send_message(
             chat_id=chat_id,
-            text="❌ Please send a valid YouTube link.",
+            text="❌ Please send a valid YouTube or Instagram link.",
         )
         return
 
+    # ---------- INSTAGRAM ----------
+    if "instagram.com" in video_url:
+        progress_message = await context.bot.send_message(
+            chat_id=chat_id,
+            text="📥 Downloading Instagram video...",
+        )
+
+        try:
+            download_dir = "downloads"
+            os.makedirs(download_dir, exist_ok=True)
+
+            ydl_opts = {
+                "outtmpl": os.path.join(download_dir, "%(title)s.%(ext)s"),
+                "noplaylist": True,
+                "quiet": True,
+                "merge_output_format": "mp4",
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=True)
+                title = info.get("title", "Instagram Video")
+
+            files = glob.glob(os.path.join(download_dir, "*.mp4"))
+            final_file = max(files, key=os.path.getctime)
+
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=progress_message.message_id,
+                text="📤 Uploading to Telegram...",
+            )
+
+            await context.bot.send_video(
+                chat_id=chat_id,
+                video=open(final_file, "rb"),
+                caption=f"📸 {title}",
+            )
+
+            os.remove(final_file)
+
+        except Exception as e:
+            logger.error(e)
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=progress_message.message_id,
+                text="❌ Failed to download Instagram video.",
+            )
+
+        return
+
+    # ---------- YOUTUBE ----------
     context.user_data["video_url"] = video_url
 
     keyboard = [
@@ -141,7 +196,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "progress_hooks": [progress.progress_hook],
         }
 
-        # -------- QUALITY OPTIONS --------
         if selected_quality == "audio_only":
             ydl_opts["format"] = "bestaudio/best"
             ydl_opts["postprocessors"] = [{
@@ -162,10 +216,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ydl_opts["merge_output_format"] = "mp4"
             expected_ext = "mp4"
 
-        # -------- DOWNLOAD --------
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
-            title = info.get("title", "video")
+            title = info.get("title", "YouTube Video")
 
         files = glob.glob(os.path.join(download_dir, f"*.{expected_ext}"))
         final_file = max(files, key=os.path.getctime)
@@ -214,5 +267,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

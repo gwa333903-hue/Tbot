@@ -31,7 +31,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # ---------------- BOT TOKEN (FROM ENV) ----------------
-TOKEN = os.getenv("8270409976:AAENgdHLIrRWotus1Yb_RsmM5KfyhbqeEw8")
+TOKEN = os.getenv("TOKEN")
 
 if not TOKEN:
     raise RuntimeError("❌ BOT TOKEN not found! Set TOKEN in Railway variables.")
@@ -214,4 +214,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
